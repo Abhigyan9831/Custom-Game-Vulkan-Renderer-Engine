@@ -1,7 +1,7 @@
 
 #include "engine/platform/Window.h"
 #include "engine/core/Logger.h"
-
+#include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL.h>
 #include <stdexcept>
 
@@ -54,6 +54,16 @@ void Window::pollEvents()
                 break;
         }
     }
+}
+std::vector<const char*> Window::vulkanExtensions() const
+{
+    Uint32 count = 0;
+    const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);
+    if (extensions == nullptr) {
+        CGE_LOG_ERROR(std::string("SDL_Vulkan_GetInstanceExtensions failed: ") + SDL_GetError());
+        throw std::runtime_error("Failed to query Vulkan instance extensions");
+    }
+    return std::vector<const char*>(extensions, extensions + count);
 }
 
 } // namespace cge

@@ -2,6 +2,7 @@
 #include "engine/core/Application.h"
 #include "engine/platform/Window.h"
 #include "engine/core/Logger.h"
+#include "engine/renderer/vulkan/VulkanContext.h"
 
 #include <chrono>
 
@@ -10,6 +11,7 @@ namespace cge {
 Application::Application()
 {
     m_window = std::make_unique<Window>("CustomGameEngine", 1920, 1080);
+    m_vulkan = std::make_unique<VulkanContext>(m_window->vulkanExtensions(), true);
 }
 
 Application::~Application()

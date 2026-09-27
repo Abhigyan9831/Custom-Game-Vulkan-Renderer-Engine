@@ -4,6 +4,7 @@
 namespace cge {
 
 class Window;
+class VulkanContext; 
 
 class Application {
 public:
@@ -13,6 +14,7 @@ public:
 
 private:
     std::unique_ptr<Window> m_window;
+    std::unique_ptr<VulkanContext> m_vulkan;
     bool m_running = true;
 };
 
