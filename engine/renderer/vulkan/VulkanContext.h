@@ -16,7 +16,14 @@ namespace cge{
             [[nodiscard]] bool validationEnabled() const { return m_validation; }
 
         private:
+            static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+            VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
+            VkDebugUtilsMessageTypeFlagsEXT             type,
+            const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+            void* pUserData);
+
             VkInstance m_instance = VK_NULL_HANDLE;
+            VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
             bool m_validation = false;
     };
 
