@@ -4,6 +4,7 @@ add_library(engine STATIC
     core/Logger.cpp
     platform/Window.cpp
     renderer/vulkan/VulkanContext.cpp
+    renderer/vulkan/VulkanDevice.cpp
 )
 
 
