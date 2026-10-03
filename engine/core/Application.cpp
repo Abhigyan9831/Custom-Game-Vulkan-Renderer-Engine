@@ -13,7 +13,7 @@ Application::Application()
 {
     m_window = std::make_unique<Window>("CustomGameEngine", 1920, 1080);
     m_vulkan = std::make_unique<VulkanContext>(m_window->vulkanExtensions(), true);
-    m_device = std::make_unique<VulkanDevice>(m_vulkan->instance());
+    m_device = std::make_unique<VulkanDevice>(m_vulkan->instance(), true);
 }
 
 Application::~Application()
