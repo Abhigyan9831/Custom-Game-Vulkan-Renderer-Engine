@@ -85,7 +85,23 @@ bool VulkanDevice::supportsSwapchain(VkPhysicalDevice device) const
     return false;
 }
 
-VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface, bool enableValidation)
+void VulkanDevice::createCommandPool()
+{
+    VkCommandPoolCreateInfo info{};
+    info.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    info.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    
+    info.queueFamilyIndex = *m_graphicsFamily;   
+                                               
+
+    if (vkCreateCommandPool(m_device, &info, nullptr, &m_commandPool) != VK_SUCCESS) {
+        throw std::runtime_error("Command pool creation failed");
+    }
+    CGE_LOG_INFO("Command pool created (graphics family)");
+}
+
+VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface,
+                           [[maybe_unused]] bool enableValidation)
     : m_instance(instance)
 {
     
@@ -132,7 +148,7 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface, bool enabl
                  " (API " + versionToString(props.apiVersion) +
                  ", graphics queue family " + std::to_string(*m_graphicsFamily) + ")");
 
-    
+   
     m_presentFamily = findPresentQueueFamily(m_physical, surface);
     if (!m_presentFamily.has_value()) {
         throw std::runtime_error("Selected GPU cannot present to this surface");
@@ -179,10 +195,68 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface, bool enabl
     vkGetDeviceQueue(m_device, *m_graphicsFamily, 0, &m_graphicsQueue);
 
     CGE_LOG_INFO("Logical device created — graphics queue ready");
+
+    
+    createCommandPool();
+}
+
+void VulkanDevice::executeOneTimeTest()
+{
+    
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool        = m_commandPool;
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(m_device, &allocInfo, &cmd);
+
+    
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    
+
+    vkEndCommandBuffer(cmd);
+
+   
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = 0;   
+
+    VkFence fence = VK_NULL_HANDLE;
+    vkCreateFence(m_device, &fenceInfo, nullptr, &fence);
+
+   
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers    = &cmd;
+
+    vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, fence);
+
+    
+    vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX);
+   
+
+    
+    vkDestroyFence(m_device, fence, nullptr);
+    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmd);
+
+    CGE_LOG_INFO("GPU executed a command buffer — submission pipeline verified");
 }
 
 VulkanDevice::~VulkanDevice()
 {
+    
+    if (m_commandPool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+    }
     if (m_device != VK_NULL_HANDLE) {
         vkDestroyDevice(m_device, nullptr);
     }

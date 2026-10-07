@@ -26,6 +26,7 @@ Application::Application()
                                                m_vulkan->surface(),
                                                static_cast<uint32_t>(m_window->width()),
                                                static_cast<uint32_t>(m_window->height()));
+    m_device->executeOneTimeTest();
 }
 
 Application::~Application()
