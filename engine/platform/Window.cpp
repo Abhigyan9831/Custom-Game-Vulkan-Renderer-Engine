@@ -66,4 +66,16 @@ std::vector<const char*> Window::vulkanExtensions() const
     return std::vector<const char*>(extensions, extensions + count);
 }
 
+VkSurfaceKHR Window::createVulkanSurface(VkInstance instance) const
+{
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    
+    if (!SDL_Vulkan_CreateSurface(m_window, instance, nullptr, &surface)) {
+        CGE_LOG_ERROR(std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
+        throw std::runtime_error("Vulkan surface creation failed");
+    }
+    CGE_LOG_INFO("Vulkan surface created for window");
+    return surface;
+}
+
 } // namespace cge

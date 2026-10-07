@@ -3,28 +3,37 @@
 #include <vulkan/vulkan.h>
 #include <vector>
 
-namespace cge{
-    class VulkanContext{
-        public:
-            VulkanContext(const std::vector<const char*>& instanceExtensions, bool EnableValidation);
-            ~VulkanContext();
+namespace cge {
 
-            VulkanContext(const VulkanContext&) = delete;             
-            VulkanContext& operator=(const VulkanContext&) = delete;
+class Window;  
 
-            [[nodiscard]] VkInstance instance() const { return m_instance; }
-            [[nodiscard]] bool validationEnabled() const { return m_validation; }
+class VulkanContext {
+public:
+    VulkanContext(const std::vector<const char*>& instanceExtensions,
+                  bool enableValidation);
+    ~VulkanContext();
 
-        private:
-            static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
-            VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
-            VkDebugUtilsMessageTypeFlagsEXT             type,
-            const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-            void* pUserData);
+    VulkanContext(const VulkanContext&) = delete;
+    VulkanContext& operator=(const VulkanContext&) = delete;
 
-            VkInstance m_instance = VK_NULL_HANDLE;
-            VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
-            bool m_validation = false;
-    };
+    // Phase 6: surface is created FROM the window, its lifetime owned here.
+    void createSurface(Window* window);
+    [[nodiscard]] VkSurfaceKHR surface() const { return m_surface; }
 
-}
+    [[nodiscard]] VkInstance instance() const { return m_instance; }
+    [[nodiscard]] bool validationEnabled() const { return m_validation; }
+
+private:
+    static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
+        VkDebugUtilsMessageTypeFlagsEXT             type,
+        const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+        void*                                       pUserData);
+
+    VkInstance m_instance = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
+    VkSurfaceKHR m_surface = VK_NULL_HANDLE;
+    bool m_validation = false;
+};
+
+} // namespace cge

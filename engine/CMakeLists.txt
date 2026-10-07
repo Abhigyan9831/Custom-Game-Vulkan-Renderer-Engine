@@ -5,6 +5,8 @@ add_library(engine STATIC
     platform/Window.cpp
     renderer/vulkan/VulkanContext.cpp
     renderer/vulkan/VulkanDevice.cpp
+    renderer/vulkan/Swapchain.cpp          # ← NEW
+
 )
 
 

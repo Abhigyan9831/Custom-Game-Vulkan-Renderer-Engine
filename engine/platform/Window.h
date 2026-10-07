@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <vulkan/vulkan.h>
+
 struct SDL_Window;
 
 namespace cge {
@@ -22,7 +24,10 @@ public:
     [[nodiscard]] int height() const { return m_height; }
 
     [[nodiscard]] SDL_Window* raw() const { return m_window; }
+
     [[nodiscard]] std::vector<const char*> vulkanExtensions() const;
+
+    [[nodiscard]] VkSurfaceKHR createVulkanSurface(VkInstance instance) const;
 
 private:
     SDL_Window* m_window = nullptr;

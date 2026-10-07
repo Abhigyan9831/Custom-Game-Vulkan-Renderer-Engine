@@ -9,7 +9,6 @@ namespace cge {
 
 namespace {
 
-// Decode Vulkan's packed version integer into readable "1.4.329" text.
 std::string versionToString(uint32_t v)
 {
     return std::to_string(VK_API_VERSION_MAJOR(v)) + "." +
@@ -21,7 +20,6 @@ std::string versionToString(uint32_t v)
 
 std::optional<uint32_t> VulkanDevice::findGraphicsQueueFamily(VkPhysicalDevice device) const
 {
-    // The two-call enumeration idiom — count first, then fill.
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
     std::vector<VkQueueFamilyProperties> families(count);
@@ -29,19 +27,36 @@ std::optional<uint32_t> VulkanDevice::findGraphicsQueueFamily(VkPhysicalDevice d
 
     for (uint32_t i = 0; i < count; ++i) {
         if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            return i;   // first match wins
+            return i;
         }
     }
-    return std::nullopt;  // no graphics family → device is disqualified
+    return std::nullopt;
+}
+
+std::optional<uint32_t> VulkanDevice::findPresentQueueFamily(VkPhysicalDevice device,
+                                                             VkSurfaceKHR surface) const
+{
+    
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
+    std::vector<VkQueueFamilyProperties> families(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
+
+    for (uint32_t i = 0; i < count; ++i) {
+        VkBool32 presentSupported = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupported);
+        if (presentSupported == VK_TRUE) {
+            return i;
+        }
+    }
+    return std::nullopt;
 }
 
 int VulkanDevice::scoreDevice(VkPhysicalDevice device) const
 {
-    // Hard gate first: can this thing draw at all?
     if (!findGraphicsQueueFamily(device).has_value()) {
-        return -1;   // reject
+        return -1;
     }
-
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(device, &props);
 
@@ -49,7 +64,7 @@ int VulkanDevice::scoreDevice(VkPhysicalDevice device) const
     switch (props.deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   score = 1000; break;
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: score = 100;  break;
-        case VK_PHYSICAL_DEVICE_TYPE_CPU:            score = 1;    break; // lavapipe
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:            score = 1;    break;
         default:                                     score = 0;    break;
     }
     return score;
@@ -57,7 +72,6 @@ int VulkanDevice::scoreDevice(VkPhysicalDevice device) const
 
 bool VulkanDevice::supportsSwapchain(VkPhysicalDevice device) const
 {
-    // Two-call enumeration idiom, fourth appearance — extensions this time.
     uint32_t count = 0;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr);
     std::vector<VkExtensionProperties> extensions(count);
@@ -71,10 +85,10 @@ bool VulkanDevice::supportsSwapchain(VkPhysicalDevice device) const
     return false;
 }
 
-VulkanDevice::VulkanDevice(VkInstance instance, bool enableValidation)
+VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface, bool enableValidation)
     : m_instance(instance)
 {
-    // ---------- Phase 4: enumerate, score, select ----------
+    
     uint32_t count = 0;
     vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
     if (count == 0) {
@@ -118,15 +132,25 @@ VulkanDevice::VulkanDevice(VkInstance instance, bool enableValidation)
                  " (API " + versionToString(props.apiVersion) +
                  ", graphics queue family " + std::to_string(*m_graphicsFamily) + ")");
 
-    // ---------- Phase 5: open our session with the GPU ----------
+    
+    m_presentFamily = findPresentQueueFamily(m_physical, surface);
+    if (!m_presentFamily.has_value()) {
+        throw std::runtime_error("Selected GPU cannot present to this surface");
+    }
+    if (m_graphicsFamily == m_presentFamily) {
+        CGE_LOG_INFO("Present queue family: same as graphics (family " +
+                     std::to_string(*m_presentFamily) + ")");
+    } else {
+        CGE_LOG_WARN("Present family differs from graphics family (" +
+                     std::to_string(*m_graphicsFamily) + " vs " +
+                     std::to_string(*m_presentFamily) + ")");
+    }
 
-    // 1. Require swapchain support — a GPU that can't present is useless to us.
+    
     if (!supportsSwapchain(m_physical)) {
         throw std::runtime_error("Selected GPU lacks VK_KHR_swapchain support");
     }
 
-    // 2. Describe which queues we want: one from the graphics family.
-    //    Priority 1.0 = "schedule this queue's work normally" (0.0 = idle priority).
     const float queuePriority = 1.0f;
     VkDeviceQueueCreateInfo queueInfo{};
     queueInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -134,13 +158,9 @@ VulkanDevice::VulkanDevice(VkInstance instance, bool enableValidation)
     queueInfo.queueCount       = 1;
     queueInfo.pQueuePriorities = &queuePriority;
 
-    // 3. Which device extensions we need.
     std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    VkPhysicalDeviceFeatures features{};
 
-    // 4. Which core features we need: none yet. Enabled lazily per phase.
-    VkPhysicalDeviceFeatures features{};   // all off
-
-    // 5. Assemble and create. THE FIRST OBJECT THAT MAKES THE GPU DO THINGS.
     VkDeviceCreateInfo deviceInfo{};
     deviceInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceInfo.queueCreateInfoCount    = 1;
@@ -156,7 +176,6 @@ VulkanDevice::VulkanDevice(VkInstance instance, bool enableValidation)
         throw std::runtime_error("Logical device creation failed");
     }
 
-    // 6. Retrieve our queue — a handle INTO the device, not something we own.
     vkGetDeviceQueue(m_device, *m_graphicsFamily, 0, &m_graphicsQueue);
 
     CGE_LOG_INFO("Logical device created — graphics queue ready");
@@ -164,9 +183,6 @@ VulkanDevice::VulkanDevice(VkInstance instance, bool enableValidation)
 
 VulkanDevice::~VulkanDevice()
 {
-    // Destroy what we created. The queue needs NO destruction (retrieved,
-    // dies with the device). The physical device needs NONE (enumerated,
-    // owned by the instance). Only the logical device is ours to destroy.
     if (m_device != VK_NULL_HANDLE) {
         vkDestroyDevice(m_device, nullptr);
     }

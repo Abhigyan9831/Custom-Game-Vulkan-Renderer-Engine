@@ -5,11 +5,10 @@
 
 namespace cge {
 
-// Owns our selected physical device AND our logical device session:
-// the queue we'll submit work to, and (Phase 6+) everything built on it.
 class VulkanDevice {
 public:
-    VulkanDevice(VkInstance instance, bool enableValidation);
+    // Phase 6: needs the surface to find the PRESENT queue family.
+    VulkanDevice(VkInstance instance, VkSurfaceKHR surface, bool enableValidation);
     ~VulkanDevice();
 
     VulkanDevice(const VulkanDevice&) = delete;
@@ -19,22 +18,22 @@ public:
     [[nodiscard]] VkDevice device() const { return m_device; }
     [[nodiscard]] VkQueue graphicsQueue() const { return m_graphicsQueue; }
     [[nodiscard]] uint32_t graphicsFamily() const { return *m_graphicsFamily; }
+    [[nodiscard]] uint32_t presentFamily() const { return *m_presentFamily; }
 
 private:
     [[nodiscard]] std::optional<uint32_t> findGraphicsQueueFamily(VkPhysicalDevice device) const;
+    [[nodiscard]] std::optional<uint32_t> findPresentQueueFamily(VkPhysicalDevice device,
+                                                                 VkSurfaceKHR surface) const;
     [[nodiscard]] int scoreDevice(VkPhysicalDevice device) const;
     [[nodiscard]] bool supportsSwapchain(VkPhysicalDevice device) const;
 
-    
-    VkInstance m_instance = VK_NULL_HANDLE;
-    
-    VkPhysicalDevice m_physical = VK_NULL_HANDLE;
-    
-    VkDevice m_device = VK_NULL_HANDLE;
-    
-    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+    VkInstance m_instance = VK_NULL_HANDLE;           // borrowed
+    VkPhysicalDevice m_physical = VK_NULL_HANDLE;     // enumerated — never destroyed
+    VkDevice m_device = VK_NULL_HANDLE;               // created — WE destroy
+    VkQueue m_graphicsQueue = VK_NULL_HANDLE;         // retrieved — dies with device
 
     std::optional<uint32_t> m_graphicsFamily;
+    std::optional<uint32_t> m_presentFamily;
 };
 
 } // namespace cge

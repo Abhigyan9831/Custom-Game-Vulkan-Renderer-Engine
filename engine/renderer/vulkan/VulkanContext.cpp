@@ -1,5 +1,6 @@
 #include "engine/renderer/vulkan/VulkanContext.h"
 #include "engine/core/Logger.h"
+#include "engine/platform/Window.h"
 
 #include <stdexcept>
 
@@ -11,9 +12,9 @@ namespace {
 bool supportsValidationLayer()
 {
     uint32_t count = 0;
-    vkEnumerateInstanceLayerProperties(&count, nullptr);      // how many layers
+    vkEnumerateInstanceLayerProperties(&count, nullptr);      // 1st call: how many?
     std::vector<VkLayerProperties> layers(count);
-    vkEnumerateInstanceLayerProperties(&count, layers.data()); // get them
+    vkEnumerateInstanceLayerProperties(&count, layers.data()); // 2nd call: get them
 
     for (const auto& layer : layers) {
         if (std::string(layer.layerName) == "VK_LAYER_KHRONOS_validation")
@@ -70,6 +71,7 @@ VulkanContext::VulkanContext(const std::vector<const char*>& instanceExtensions,
         ? std::string("Vulkan instance created (validation: ON)")
         : std::string("Vulkan instance created (validation: OFF)"));
 
+    
     if (m_validation) {
         auto createMessenger = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
             vkGetInstanceProcAddr(m_instance, "vkCreateDebugUtilsMessengerEXT"));
@@ -80,11 +82,9 @@ VulkanContext::VulkanContext(const std::vector<const char*>& instanceExtensions,
 
         VkDebugUtilsMessengerCreateInfoEXT messengerInfo{};
         messengerInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        
         messengerInfo.messageSeverity =
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-       
         messengerInfo.messageType =
             VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
@@ -94,17 +94,27 @@ VulkanContext::VulkanContext(const std::vector<const char*>& instanceExtensions,
 
         if (createMessenger(m_instance, &messengerInfo, nullptr, &m_debugMessenger)
                 != VK_SUCCESS) {
-            CGE_LOG_WARN("Failed to create debug messenger — continuing without");
+            CGE_LOG_WARN("Failed to create debug messenger continuing without");
         } else {
-            CGE_LOG_INFO("Debug messenger active — validation messages routed to engine log");
+            CGE_LOG_INFO("Debug messenger active validation messages routed to engine log");
         }
     }
     
 }
 
+
+void VulkanContext::createSurface(Window* window)
+{
+    m_surface = window->createVulkanSurface(m_instance);
+}
+
+
 VulkanContext::~VulkanContext()
 {
     
+    if (m_surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+    }
     if (m_debugMessenger != VK_NULL_HANDLE) {
         auto destroyMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
             vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT"));
@@ -124,13 +134,11 @@ VkBool32 VulkanContext::debugCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* /*pUserData*/)
 {
-    
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
         CGE_LOG_ERROR(std::string("[Vulkan validation] ") + pCallbackData->pMessage);
     } else {
         CGE_LOG_INFO(std::string("[Vulkan validation] ") + pCallbackData->pMessage);
     }
-    
     return VK_FALSE;
 }
 
