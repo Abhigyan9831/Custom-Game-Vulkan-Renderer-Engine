@@ -1,7 +1,6 @@
-
 cmake_minimum_required(VERSION 3.22)
 
-project (CustomGameEngine LANGUAGES C CXX)
+project(CustomGameEngine LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,12 +15,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 include(FetchContent)
+find_package(Vulkan REQUIRED)
+
 
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON  CACHE BOOL "" FORCE)
-
-find_package(Vulkan REQUIRED) 
-
 FetchContent_Declare(
     sdl3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
@@ -29,8 +27,25 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(sdl3)
 
+
 add_subdirectory(engine)
 
 add_executable(CustomGameEngine app/main.cpp)
 target_link_libraries(CustomGameEngine PRIVATE engine)
 
+
+
+
+foreach(SHADER basic.vert basic.frag)
+    add_custom_command(
+        OUTPUT  ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
+        COMMAND glslangValidator -V ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+                -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+        COMMENT "Compiling shader: ${SHADER}"
+    )
+    list(APPEND SHADER_SPV ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv)
+endforeach()
+
+add_custom_target(shaders ALL DEPENDS ${SHADER_SPV})
+add_dependencies(CustomGameEngine shaders)

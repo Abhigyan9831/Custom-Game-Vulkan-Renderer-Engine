@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <string>
 
 namespace cge {
 
@@ -27,8 +28,10 @@ private:
     void createFramebuffers();
     void createCommandBuffers();
     void createSyncObjects();
+    void createGraphicsPipeline();
 
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+    static std::vector<char> readFile(const std::string& path);
 
     // Construction order = declaration order (destruction reverses it).
     std::unique_ptr<VulkanContext> m_context;
@@ -36,6 +39,8 @@ private:
     std::unique_ptr<Swapchain> m_swapchain;
 
     VkRenderPass m_renderPass = VK_NULL_HANDLE;      // created — WE destroy
+    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline m_pipeline = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> m_framebuffers;       // created — WE destroy (one per image)
     std::vector<VkCommandBuffer> m_commandBuffers;   // allocated from pool (one per frame-in-flight)
 
