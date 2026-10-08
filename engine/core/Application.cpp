@@ -1,9 +1,7 @@
 #include "engine/core/Application.h"
 #include "engine/platform/Window.h"
 #include "engine/core/Logger.h"
-#include "engine/renderer/vulkan/VulkanContext.h"
-#include "engine/renderer/vulkan/VulkanDevice.h"
-#include "engine/renderer/vulkan/Swapchain.h"
+#include "engine/renderer/Renderer.h"
 
 #include <chrono>
 
@@ -11,22 +9,8 @@ namespace cge {
 
 Application::Application()
 {
-    m_window = std::make_unique<Window>("CustomGameEngine", 1920, 1080);
-    m_vulkan = std::make_unique<VulkanContext>(m_window->vulkanExtensions(), true);
-
-    
-    m_vulkan->createSurface(m_window.get());
-
-    m_device = std::make_unique<VulkanDevice>(m_vulkan->instance(),
-                                              m_vulkan->surface(), true);
-
-    
-    m_swapchain = std::make_unique<Swapchain>(m_device->device(),
-                                               m_device->physical(),
-                                               m_vulkan->surface(),
-                                               static_cast<uint32_t>(m_window->width()),
-                                               static_cast<uint32_t>(m_window->height()));
-    m_device->executeOneTimeTest();
+    m_window = std::make_unique<Window>("CustomGameEngine", 800, 600);
+    m_renderer = std::make_unique<Renderer>(m_window.get());
 }
 
 Application::~Application()

@@ -3,9 +3,11 @@ add_library(engine STATIC
     core/Application.cpp
     core/Logger.cpp
     platform/Window.cpp
+    renderer/Renderer.cpp 
     renderer/vulkan/VulkanContext.cpp
     renderer/vulkan/VulkanDevice.cpp
-    renderer/vulkan/Swapchain.cpp          # ← NEW
+    renderer/vulkan/Swapchain.cpp 
+             
 
 )
 
