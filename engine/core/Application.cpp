@@ -15,7 +15,7 @@ Application::Application()
 
 Application::~Application()
 {
-    
+   
 }
 
 int Application::run()
@@ -36,7 +36,9 @@ int Application::run()
         m_window->pollEvents();
 
         
+        m_renderer->drawFrame();
 
+        
         elapsed += dt;
         ++frameCount;
         if (elapsed >= 1.0) {
@@ -52,4 +54,4 @@ int Application::run()
     return 0;
 }
 
-} // namespace cge
+} 
