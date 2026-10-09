@@ -1,6 +1,8 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
+#include "engine/assets/MeshData.h"
+
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -17,16 +19,25 @@ class Swapchain;
 
 struct Vertex {
     glm::vec3 pos;
+    glm::vec3 normal;
     glm::vec3 color;
 
     static VkVertexInputBindingDescription bindingDescription();
-    static std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions();
+    static std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions();
 };
 
 struct Ubo {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
+};
+
+struct GpuMesh {
+    VkBuffer vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
+    VkBuffer indexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+    uint32_t indexCount = 0;
 };
 
 class Renderer {
@@ -46,7 +57,7 @@ private:
     void createFramebuffers();
     void createCommandBuffers();
     void createSyncObjects();
-    void createVertexAndIndexBuffers();
+    void uploadMeshes(const std::vector<MeshData>& meshes);
     void createUniformBuffers();
     void createDescriptorPoolAndSets();
     void updateUniformBuffer(uint32_t currentFrame);
@@ -70,10 +81,7 @@ private:
     std::vector<VkFramebuffer> m_framebuffers;
     std::vector<VkCommandBuffer> m_commandBuffers;
 
-    VkBuffer m_vertexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory m_vertexBufferMemory = VK_NULL_HANDLE;
-    VkBuffer m_indexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory m_indexBufferMemory = VK_NULL_HANDLE;
+    std::vector<GpuMesh> m_meshes;
 
     std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> m_uniformBuffers{};
     std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> m_uniformMemories{};

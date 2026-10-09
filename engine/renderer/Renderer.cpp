@@ -1,7 +1,7 @@
-
 #include "engine/renderer/Renderer.h"
 #include "engine/platform/Window.h"
 #include "engine/core/Logger.h"
+#include "engine/assets/AssetManager.h"
 #include "engine/renderer/vulkan/VulkanContext.h"
 #include "engine/renderer/vulkan/VulkanDevice.h"
 #include "engine/renderer/vulkan/Swapchain.h"
@@ -25,9 +25,9 @@ VkVertexInputBindingDescription Vertex::bindingDescription()
     return binding;
 }
 
-std::array<VkVertexInputAttributeDescription, 2> Vertex::attributeDescriptions()
+std::array<VkVertexInputAttributeDescription, 3> Vertex::attributeDescriptions()
 {
-    std::array<VkVertexInputAttributeDescription, 2> attrs{};
+    std::array<VkVertexInputAttributeDescription, 3> attrs{};
 
     attrs[0].binding  = 0;
     attrs[0].location = 0;
@@ -37,7 +37,12 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::attributeDescriptions()
     attrs[1].binding  = 0;
     attrs[1].location = 1;
     attrs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[1].offset   = offsetof(Vertex, color);
+    attrs[1].offset   = offsetof(Vertex, normal);
+
+    attrs[2].binding  = 0;
+    attrs[2].location = 2;
+    attrs[2].format   = VK_FORMAT_R32G32B32_SFLOAT;
+    attrs[2].offset   = offsetof(Vertex, color);
 
     return attrs;
 }
@@ -63,7 +68,11 @@ Renderer::Renderer(Window* window)
     createFramebuffers();
     createCommandBuffers();
     createSyncObjects();
-    createVertexAndIndexBuffers();
+
+    AssetManager assets;
+    const std::vector<MeshData> meshes = assets.loadGlb("assets/characters/player.glb");
+    uploadMeshes(meshes);
+
     createUniformBuffers();
     createDescriptorPoolAndSets();
 
@@ -161,59 +170,65 @@ void Renderer::copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size)
     vkFreeCommandBuffers(m_device->device(), m_device->commandPool(), 1, &cmd);
 }
 
-void Renderer::createVertexAndIndexBuffers()
+void Renderer::uploadMeshes(const std::vector<MeshData>& meshes)
 {
-    const std::vector<Vertex> vertices = {
-        { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.2f, 0.2f } },
-        { {  0.5f, -0.5f, -0.5f }, { 0.2f, 1.0f, 0.3f } },
-        { {  0.5f,  0.5f,  0.5f }, { 0.2f, 0.3f, 1.0f } },
-        { { -0.5f,  0.5f,  0.5f }, { 1.0f, 0.9f, 0.2f } },
-    };
-    const std::vector<uint16_t> indices = { 0, 3, 2,  0, 2, 1 };
+    m_meshes.resize(meshes.size());
 
-    const VkDeviceSize vertexSize = sizeof(vertices[0]) * vertices.size();
+    for (size_t m = 0; m < meshes.size(); ++m) {
+        const MeshData& data = meshes[m];
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingMemory;
-    createBuffer(vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 stagingBuffer, stagingMemory);
+        std::vector<Vertex> vertices(data.positions.size());
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            vertices[i].pos    = data.positions[i];
+            vertices[i].normal = data.normals[i];
+            vertices[i].color   = data.colors[i];
+        }
 
-    void* data = nullptr;
-    vkMapMemory(m_device->device(), stagingMemory, 0, vertexSize, 0, &data);
-    std::memcpy(data, vertices.data(), static_cast<size_t>(vertexSize));
-    vkUnmapMemory(m_device->device(), stagingMemory);
+        const VkDeviceSize vertexSize = sizeof(vertices[0]) * vertices.size();
+        const VkDeviceSize indexSize  = sizeof(uint32_t) * data.indices.size();
 
-    createBuffer(vertexSize,
-                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                 m_vertexBuffer, m_vertexBufferMemory);
+        // ---- vertex staging → VRAM ----
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingMemory;
+        createBuffer(vertexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     stagingBuffer, stagingMemory);
 
-    copyBuffer(stagingBuffer, m_vertexBuffer, vertexSize);
+        void* mapped = nullptr;
+        vkMapMemory(m_device->device(), stagingMemory, 0, vertexSize, 0, &mapped);
+        std::memcpy(mapped, vertices.data(), static_cast<size_t>(vertexSize));
+        vkUnmapMemory(m_device->device(), stagingMemory);
 
-    vkDestroyBuffer(m_device->device(), stagingBuffer, nullptr);
-    vkFreeMemory(m_device->device(), stagingMemory, nullptr);
+        createBuffer(vertexSize,
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                     m_meshes[m].vertexBuffer, m_meshes[m].vertexMemory);
+        copyBuffer(stagingBuffer, m_meshes[m].vertexBuffer, vertexSize);
 
-    const VkDeviceSize indexSize = sizeof(indices[0]) * indices.size();
+        vkDestroyBuffer(m_device->device(), stagingBuffer, nullptr);
+        vkFreeMemory(m_device->device(), stagingMemory, nullptr);
 
-    createBuffer(indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 stagingBuffer, stagingMemory);
-    vkMapMemory(m_device->device(), stagingMemory, 0, indexSize, 0, &data);
-    std::memcpy(data, indices.data(), static_cast<size_t>(indexSize));
-    vkUnmapMemory(m_device->device(), stagingMemory);
+        // ---- index staging → VRAM ----
+        createBuffer(indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     stagingBuffer, stagingMemory);
 
-    createBuffer(indexSize,
-                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                 m_indexBuffer, m_indexBufferMemory);
-    copyBuffer(stagingBuffer, m_indexBuffer, indexSize);
+        vkMapMemory(m_device->device(), stagingMemory, 0, indexSize, 0, &mapped);
+        std::memcpy(mapped, data.indices.data(), static_cast<size_t>(indexSize));
+        vkUnmapMemory(m_device->device(), stagingMemory);
 
-    vkDestroyBuffer(m_device->device(), stagingBuffer, nullptr);
-    vkFreeMemory(m_device->device(), stagingMemory, nullptr);
+        createBuffer(indexSize,
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                     m_meshes[m].indexBuffer, m_meshes[m].indexMemory);
+        copyBuffer(stagingBuffer, m_meshes[m].indexBuffer, indexSize);
 
-    CGE_LOG_INFO("Vertex/index buffers created (" + std::to_string(vertices.size()) +
-                 " verts, " + std::to_string(indices.size()) + " indices)");
+        vkDestroyBuffer(m_device->device(), stagingBuffer, nullptr);
+        vkFreeMemory(m_device->device(), stagingMemory, nullptr);
+
+        m_meshes[m].indexCount = static_cast<uint32_t>(data.indices.size());
+    }
+    CGE_LOG_INFO("Uploaded " + std::to_string(m_meshes.size()) + " meshes to GPU");
 }
 
 void Renderer::createDescriptorSetLayout()
@@ -269,10 +284,6 @@ void Renderer::createDescriptorPoolAndSets()
         throw std::runtime_error("Descriptor pool creation failed");
     }
 
-    // pSetLayouts must be an ARRAY — one layout per set being allocated.
-    // (The bug: we previously passed &m_descriptorSetLayout (a pointer to ONE
-    // layout) while descriptorSetCount = 2, so Vulkan read a garbage second
-    // element — caught by validation, segfault without it.)
     std::array<VkDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{
         m_descriptorSetLayout, m_descriptorSetLayout
     };
@@ -314,23 +325,22 @@ void Renderer::updateUniformBuffer(uint32_t currentFrame)
 
     Ubo ubo{};
 
-    
+    // Model: identity + slow Y rotation so you can see all sides of the character.
+    // If the model is huge or tiny, add glm::scale here (Blender units!).
     ubo.model = glm::rotate(glm::mat4(1.0f),
-                            time * glm::radians(60.0f),
-                            glm::vec3(1.0f, 0.0f, 0.0f));
-    
+                            time * glm::radians(30.0f),
+                            glm::vec3(0.0f, 1.0f, 0.0f));
 
-    
-    ubo.view = glm::lookAt(glm::vec3(0.0f, 2.0f, 3.0f),
-                           glm::vec3(0.0f, 0.0f, 0.0f),
+    // View: camera pulled back — model scale is unknown until first run.
+    ubo.view = glm::lookAt(glm::vec3(0.0f, 5.0f, 8.0f),
+                           glm::vec3(0.0f, 1.0f, 0.0f),
                            glm::vec3(0.0f, 1.0f, 0.0f));
 
-    
     ubo.proj = glm::perspective(glm::radians(45.0f),
                                 static_cast<float>(m_swapchain->extent().width) /
                                 static_cast<float>(m_swapchain->extent().height),
                                 0.1f, 100.0f);
-    ubo.proj[1][1] *= -1.0f;   
+    ubo.proj[1][1] *= -1.0f;
 
     std::memcpy(m_uniformMapped[currentFrame], &ubo, sizeof(ubo));
 }
@@ -610,11 +620,12 @@ void Renderer::drawFrame()
     scissor.extent = m_swapchain->extent();
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &m_vertexBuffer, &offset);
-    vkCmdBindIndexBuffer(cmd, m_indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-
-    vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+    for (const GpuMesh& mesh : m_meshes) {
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertexBuffer, &offset);
+        vkCmdBindIndexBuffer(cmd, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
@@ -666,10 +677,12 @@ Renderer::~Renderer()
         vkFreeMemory(dev, m_uniformMemories[i], nullptr);
     }
 
-    vkDestroyBuffer(dev, m_indexBuffer, nullptr);
-    vkFreeMemory(dev, m_indexBufferMemory, nullptr);
-    vkDestroyBuffer(dev, m_vertexBuffer, nullptr);
-    vkFreeMemory(dev, m_vertexBufferMemory, nullptr);
+    for (const GpuMesh& mesh : m_meshes) {
+        vkDestroyBuffer(dev, mesh.indexBuffer, nullptr);
+        vkFreeMemory(dev, mesh.indexMemory, nullptr);
+        vkDestroyBuffer(dev, mesh.vertexBuffer, nullptr);
+        vkFreeMemory(dev, mesh.vertexMemory, nullptr);
+    }
 
     for (VkFramebuffer fb : m_framebuffers) {
         vkDestroyFramebuffer(dev, fb, nullptr);
