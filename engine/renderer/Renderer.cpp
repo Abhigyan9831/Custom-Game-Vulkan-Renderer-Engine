@@ -1,9 +1,12 @@
+
 #include "engine/renderer/Renderer.h"
 #include "engine/platform/Window.h"
 #include "engine/core/Logger.h"
 #include "engine/renderer/vulkan/VulkanContext.h"
 #include "engine/renderer/vulkan/VulkanDevice.h"
 #include "engine/renderer/vulkan/Swapchain.h"
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <cstring>
 #include <fstream>
@@ -40,6 +43,7 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::attributeDescriptions()
 }
 
 Renderer::Renderer(Window* window)
+    : m_startTime(std::chrono::steady_clock::now())
 {
     m_context = std::make_unique<VulkanContext>(window->vulkanExtensions(), true);
     m_context->createSurface(window);
@@ -54,11 +58,14 @@ Renderer::Renderer(Window* window)
     m_device->executeOneTimeTest();
 
     createRenderPass();
+    createDescriptorSetLayout();
     createGraphicsPipeline();
     createFramebuffers();
     createCommandBuffers();
     createSyncObjects();
     createVertexAndIndexBuffers();
+    createUniformBuffers();
+    createDescriptorPoolAndSets();
 
     CGE_LOG_INFO("Renderer online");
 }
@@ -162,7 +169,7 @@ void Renderer::createVertexAndIndexBuffers()
         { {  0.5f,  0.5f }, { 0.2f, 0.3f, 1.0f } },
         { { -0.5f,  0.5f }, { 1.0f, 0.9f, 0.2f } },
     };
-    const std::vector<uint16_t> indices = { 0, 1, 2,  2, 3, 0 };
+    const std::vector<uint16_t> indices = { 0, 3, 2,  0, 2, 1 };
 
     const VkDeviceSize vertexSize = sizeof(vertices[0]) * vertices.size();
 
@@ -207,6 +214,110 @@ void Renderer::createVertexAndIndexBuffers()
 
     CGE_LOG_INFO("Vertex/index buffers created (" + std::to_string(vertices.size()) +
                  " verts, " + std::to_string(indices.size()) + " indices)");
+}
+
+void Renderer::createDescriptorSetLayout()
+{
+    VkDescriptorSetLayoutBinding uboBinding{};
+    uboBinding.binding         = 0;
+    uboBinding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboBinding.descriptorCount = 1;
+    uboBinding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+    uboBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutCreateInfo info{};
+    info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.bindingCount = 1;
+    info.pBindings    = &uboBinding;
+
+    if (vkCreateDescriptorSetLayout(m_device->device(), &info, nullptr,
+                                    &m_descriptorSetLayout) != VK_SUCCESS) {
+        throw std::runtime_error("Descriptor set layout creation failed");
+    }
+    CGE_LOG_INFO("Descriptor set layout created (binding 0: uniform buffer, vertex stage)");
+}
+
+void Renderer::createUniformBuffers()
+{
+    const VkDeviceSize bufferSize = sizeof(Ubo);
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     m_uniformBuffers[i], m_uniformMemories[i]);
+
+        vkMapMemory(m_device->device(), m_uniformMemories[i], 0, bufferSize, 0,
+                    &m_uniformMapped[i]);
+    }
+    CGE_LOG_INFO("Uniform buffers created (2, persistently mapped)");
+}
+
+void Renderer::createDescriptorPoolAndSets()
+{
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes    = &poolSize;
+    poolInfo.maxSets       = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+    if (vkCreateDescriptorPool(m_device->device(), &poolInfo, nullptr,
+                               &m_descriptorPool) != VK_SUCCESS) {
+        throw std::runtime_error("Descriptor pool creation failed");
+    }
+
+    // pSetLayouts must be an ARRAY — one layout per set being allocated.
+    // (The bug: we previously passed &m_descriptorSetLayout (a pointer to ONE
+    // layout) while descriptorSetCount = 2, so Vulkan read a garbage second
+    // element — caught by validation, segfault without it.)
+    std::array<VkDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{
+        m_descriptorSetLayout, m_descriptorSetLayout
+    };
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool     = m_descriptorPool;
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    allocInfo.pSetLayouts        = layouts.data();
+
+    if (vkAllocateDescriptorSets(m_device->device(), &allocInfo,
+                                 m_descriptorSets.data()) != VK_SUCCESS) {
+        throw std::runtime_error("Descriptor set allocation failed");
+    }
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = m_uniformBuffers[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range  = sizeof(Ubo);
+
+        VkWriteDescriptorSet write{};
+        write.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet            = m_descriptorSets[i];
+        write.dstBinding        = 0;
+        write.descriptorCount   = 1;
+        write.descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo      = &bufferInfo;
+
+        vkUpdateDescriptorSets(m_device->device(), 1, &write, 0, nullptr);
+    }
+    CGE_LOG_INFO("Descriptor pool + sets created");
+}
+
+void Renderer::updateUniformBuffer(uint32_t currentFrame)
+{
+    const auto now = std::chrono::steady_clock::now();
+    const float time = std::chrono::duration<float>(now - m_startTime).count();
+
+    Ubo ubo{};
+    ubo.model = glm::rotate(glm::mat4(1.0f),
+                            time * glm::radians(90.0f),
+                            glm::vec3(0.0f, 0.0f, 1.0f));
+
+    std::memcpy(m_uniformMapped[currentFrame], &ubo, sizeof(ubo));
 }
 
 void Renderer::createRenderPass()
@@ -307,7 +418,7 @@ void Renderer::createGraphicsPipeline()
     rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.cullMode    = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.lineWidth   = 1.0f;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
@@ -331,7 +442,9 @@ void Renderer::createGraphicsPipeline()
     dynamicState.pDynamicStates    = dynStates;
 
     VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts    = &m_descriptorSetLayout;
     if (vkCreatePipelineLayout(m_device->device(), &layoutInfo, nullptr,
                                &m_pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("Pipeline layout creation failed");
@@ -435,6 +548,8 @@ void Renderer::drawFrame()
     vkWaitForFences(dev, 1, &m_inFlight[m_currentFrame], VK_TRUE, UINT64_MAX);
     vkResetFences(dev, 1, &m_inFlight[m_currentFrame]);
 
+    updateUniformBuffer(m_currentFrame);
+
     uint32_t imageIndex = 0;
     const VkResult acquired = vkAcquireNextImageKHR(
         dev, swap, UINT64_MAX, m_imageAvailable[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
@@ -466,6 +581,9 @@ void Renderer::drawFrame()
     vkCmdBeginRenderPass(cmd, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
+                            0, 1, &m_descriptorSets[m_currentFrame], 0, nullptr);
 
     VkViewport viewport{};
     viewport.width    = static_cast<float>(m_swapchain->extent().width);
@@ -523,6 +641,15 @@ Renderer::~Renderer()
     }
 
     const VkDevice dev = m_device->device();
+
+    vkDestroyDescriptorPool(dev, m_descriptorPool, nullptr);
+    vkDestroyDescriptorSetLayout(dev, m_descriptorSetLayout, nullptr);
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        vkUnmapMemory(dev, m_uniformMemories[i]);
+        vkDestroyBuffer(dev, m_uniformBuffers[i], nullptr);
+        vkFreeMemory(dev, m_uniformMemories[i], nullptr);
+    }
 
     vkDestroyBuffer(dev, m_indexBuffer, nullptr);
     vkFreeMemory(dev, m_indexBufferMemory, nullptr);
