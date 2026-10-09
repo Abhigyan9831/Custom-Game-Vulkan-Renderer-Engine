@@ -16,7 +16,7 @@ class VulkanDevice;
 class Swapchain;
 
 struct Vertex {
-    glm::vec2 pos;
+    glm::vec3 pos;
     glm::vec3 color;
 
     static VkVertexInputBindingDescription bindingDescription();
@@ -25,6 +25,8 @@ struct Vertex {
 
 struct Ubo {
     glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
 };
 
 class Renderer {

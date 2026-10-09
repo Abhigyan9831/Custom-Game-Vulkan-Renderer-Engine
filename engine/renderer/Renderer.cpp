@@ -31,7 +31,7 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::attributeDescriptions()
 
     attrs[0].binding  = 0;
     attrs[0].location = 0;
-    attrs[0].format   = VK_FORMAT_R32G32_SFLOAT;
+    attrs[0].format   = VK_FORMAT_R32G32B32_SFLOAT;
     attrs[0].offset   = offsetof(Vertex, pos);
 
     attrs[1].binding  = 0;
@@ -164,10 +164,10 @@ void Renderer::copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size)
 void Renderer::createVertexAndIndexBuffers()
 {
     const std::vector<Vertex> vertices = {
-        { { -0.5f, -0.5f }, { 1.0f, 0.2f, 0.2f } },
-        { {  0.5f, -0.5f }, { 0.2f, 1.0f, 0.3f } },
-        { {  0.5f,  0.5f }, { 0.2f, 0.3f, 1.0f } },
-        { { -0.5f,  0.5f }, { 1.0f, 0.9f, 0.2f } },
+        { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.2f, 0.2f } },
+        { {  0.5f, -0.5f, -0.5f }, { 0.2f, 1.0f, 0.3f } },
+        { {  0.5f,  0.5f,  0.5f }, { 0.2f, 0.3f, 1.0f } },
+        { { -0.5f,  0.5f,  0.5f }, { 1.0f, 0.9f, 0.2f } },
     };
     const std::vector<uint16_t> indices = { 0, 3, 2,  0, 2, 1 };
 
@@ -313,9 +313,24 @@ void Renderer::updateUniformBuffer(uint32_t currentFrame)
     const float time = std::chrono::duration<float>(now - m_startTime).count();
 
     Ubo ubo{};
+
+    
     ubo.model = glm::rotate(glm::mat4(1.0f),
-                            time * glm::radians(90.0f),
-                            glm::vec3(0.0f, 0.0f, 1.0f));
+                            time * glm::radians(60.0f),
+                            glm::vec3(1.0f, 0.0f, 0.0f));
+    
+
+    
+    ubo.view = glm::lookAt(glm::vec3(0.0f, 2.0f, 3.0f),
+                           glm::vec3(0.0f, 0.0f, 0.0f),
+                           glm::vec3(0.0f, 1.0f, 0.0f));
+
+    
+    ubo.proj = glm::perspective(glm::radians(45.0f),
+                                static_cast<float>(m_swapchain->extent().width) /
+                                static_cast<float>(m_swapchain->extent().height),
+                                0.1f, 100.0f);
+    ubo.proj[1][1] *= -1.0f;   
 
     std::memcpy(m_uniformMapped[currentFrame], &ubo, sizeof(ubo));
 }
