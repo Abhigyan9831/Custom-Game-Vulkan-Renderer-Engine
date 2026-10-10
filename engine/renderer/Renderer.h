@@ -21,9 +21,10 @@ struct Vertex {
     glm::vec3 pos;
     glm::vec3 normal;
     glm::vec3 color;
+    glm::vec2 uv;
 
     static VkVertexInputBindingDescription bindingDescription();
-    static std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions();
+    static std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions();
 };
 
 struct Ubo {
@@ -40,6 +41,13 @@ struct GpuMesh {
     uint32_t indexCount = 0;
 };
 
+struct GpuTexture {
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE;
+};
+
 class Renderer {
 public:
     explicit Renderer(Window* window);
@@ -53,6 +61,7 @@ public:
 private:
     void createRenderPass();
     void createDescriptorSetLayout();
+    void createTextureSetLayout();
     void createGraphicsPipeline();
     void createFramebuffers();
     void createCommandBuffers();
@@ -60,6 +69,12 @@ private:
     void uploadMeshes(const std::vector<MeshData>& meshes);
     void createUniformBuffers();
     void createDescriptorPoolAndSets();
+    void loadTextures(const ModelData& model);
+    void allocateTextureSets(const ModelData& model, int fallbackIndex);
+    void createTexture(const TextureData& data, GpuTexture& out);
+    void transitionImageLayout(VkImage image, VkImageLayout oldLayout,
+                              VkImageLayout newLayout);
+    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     void updateUniformBuffer(uint32_t currentFrame);
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                       VkMemoryPropertyFlags properties,
@@ -76,12 +91,15 @@ private:
 
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_textureSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_pipeline = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> m_framebuffers;
     std::vector<VkCommandBuffer> m_commandBuffers;
 
     std::vector<GpuMesh> m_meshes;
+    std::vector<GpuTexture> m_textures;
+    std::vector<VkDescriptorSet> m_textureSets;
 
     std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> m_uniformBuffers{};
     std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> m_uniformMemories{};

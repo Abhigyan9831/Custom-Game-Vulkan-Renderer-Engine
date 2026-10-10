@@ -1,14 +1,13 @@
-
 #pragma once
 #include "engine/assets/MeshData.h"
-#include <string>
-#include <vector>
 
-namespace cge{
+#include <string>
+
+namespace cge {
+
 class AssetManager {
 public:
-    
-    [[nodiscard]] std::vector<MeshData> loadGlb(const std::string& path) const;
+    [[nodiscard]] ModelData loadGlb(const std::string& path) const;
 };
 
-}
+} // namespace cge
