@@ -68,13 +68,14 @@ Renderer::Renderer(Window* window)
     m_device->executeOneTimeTest();
 
     createRenderPass();
-    createDescriptorSetLayout();
     createTextureSetLayout();
+    createDescriptorSetLayout();
 
     AssetManager assets;
     const ModelData model = assets.loadGlb("assets/characters/player.glb");
     uploadMeshes(model.meshes);
 
+    createDepthResources();
     createGraphicsPipeline();
     createFramebuffers();
     createCommandBuffers();
@@ -115,6 +116,20 @@ uint32_t Renderer::findMemoryType(uint32_t typeFilter,
         }
     }
     throw std::runtime_error("No suitable memory type found");
+}
+
+VkFormat Renderer::findDepthFormat() const
+{
+    const VkFormat candidates[] = { VK_FORMAT_D32_SFLOAT,
+                                    VK_FORMAT_D24_UNORM_S8_UINT };
+    for (VkFormat format : candidates) {
+        VkFormatProperties props{};
+        vkGetPhysicalDeviceFormatProperties(m_device->physical(), format, &props);
+        if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            return format;
+        }
+    }
+    throw std::runtime_error("No supported depth format found");
 }
 
 void Renderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
@@ -277,6 +292,66 @@ void Renderer::createTextureSetLayout()
         throw std::runtime_error("Texture set layout creation failed");
     }
     CGE_LOG_INFO("Texture set layout created (binding 0: sampler, fragment stage)");
+}
+
+void Renderer::createDepthResources()
+{
+    const VkFormat depthFormat = findDepthFormat();
+    const uint32_t imageCount = m_swapchain->imageCount();
+
+    m_depthImages.resize(imageCount);
+    m_depthMemories.resize(imageCount);
+    m_depthViews.resize(imageCount);
+
+    for (uint32_t i = 0; i < imageCount; ++i) {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType     = VK_IMAGE_TYPE_2D;
+        imageInfo.format        = depthFormat;
+        imageInfo.extent        = { m_swapchain->extent().width,
+                                     m_swapchain->extent().height, 1 };
+        imageInfo.mipLevels     = 1;
+        imageInfo.arrayLayers   = 1;
+        imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        if (vkCreateImage(m_device->device(), &imageInfo, nullptr, &m_depthImages[i])
+                != VK_SUCCESS) {
+            throw std::runtime_error("Depth image creation failed");
+        }
+
+        VkMemoryRequirements memReqs{};
+        vkGetImageMemoryRequirements(m_device->device(), m_depthImages[i], &memReqs);
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize  = memReqs.size;
+        allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits,
+                                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (vkAllocateMemory(m_device->device(), &allocInfo, nullptr, &m_depthMemories[i])
+                != VK_SUCCESS) {
+            throw std::runtime_error("Depth memory allocation failed");
+        }
+        vkBindImageMemory(m_device->device(), m_depthImages[i], m_depthMemories[i], 0);
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image    = m_depthImages[i];
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format   = depthFormat;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(m_device->device(), &viewInfo, nullptr, &m_depthViews[i])
+                != VK_SUCCESS) {
+            throw std::runtime_error("Depth image view creation failed");
+        }
+    }
+    CGE_LOG_INFO("Depth resources created (" + std::to_string(imageCount) + " buffers, " +
+                 std::to_string(m_swapchain->extent().width) + "x" +
+                 std::to_string(m_swapchain->extent().height) + ", D32)");
 }
 
 void Renderer::createUniformBuffers()
@@ -569,13 +644,13 @@ void Renderer::allocateTextureSets(const ModelData& model, int fallbackIndex)
     }
 
     for (size_t i = 0; i < m_meshes.size(); ++i) {
-        
         int texIdx = fallbackIndex;
         if (model.meshes[i].textureIndex >= 0 &&
             model.meshes[i].textureIndex + 1 < static_cast<int>(m_textures.size())) {
-            texIdx = model.meshes[i].textureIndex + 1;   // +1: fallback occupies slot 0
+            texIdx = model.meshes[i].textureIndex + 1;
         } else if (model.meshes[i].textureIndex >= 0) {
-            CGE_LOG_WARN("Mesh " + std::to_string(i) + ": texture index out of range — using fallback");
+            CGE_LOG_WARN("Mesh " + std::to_string(i) +
+                         ": texture index out of range — using fallback");
         }
         const GpuTexture& tex = m_textures[texIdx];
 
@@ -621,6 +696,8 @@ void Renderer::updateUniformBuffer(uint32_t currentFrame)
 
 void Renderer::createRenderPass()
 {
+    const VkFormat depthFormat = findDepthFormat();
+
     VkAttachmentDescription color{};
     color.format         = m_swapchain->format();
     color.samples        = VK_SAMPLE_COUNT_1_BIT;
@@ -631,27 +708,46 @@ void Renderer::createRenderPass()
     color.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
     color.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+    VkAttachmentDescription depth{};
+    depth.format         = depthFormat;
+    depth.samples        = VK_SAMPLE_COUNT_1_BIT;
+    depth.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription attachments[2] = { color, depth };
+
     VkAttachmentReference colorRef{};
     colorRef.attachment = 0;
     colorRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+    VkAttachmentReference depthRef{};
+    depthRef.attachment = 1;
+    depthRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments    = &colorRef;
+    subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount    = 1;
+    subpass.pColorAttachments       = &colorRef;
+    subpass.pDepthStencilAttachment = &depthRef;
 
     VkSubpassDependency dep{};
     dep.srcSubpass    = VK_SUBPASS_EXTERNAL;
     dep.dstSubpass    = 0;
     dep.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dep.srcAccessMask = 0;
-    dep.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dep.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
     VkRenderPassCreateInfo info{};
     info.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    info.attachmentCount = 1;
-    info.pAttachments    = &color;
+    info.attachmentCount = 2;
+    info.pAttachments    = attachments;
     info.subpassCount    = 1;
     info.pSubpasses      = &subpass;
     info.dependencyCount = 1;
@@ -660,7 +756,7 @@ void Renderer::createRenderPass()
     if (vkCreateRenderPass(m_device->device(), &info, nullptr, &m_renderPass) != VK_SUCCESS) {
         throw std::runtime_error("Render pass creation failed");
     }
-    CGE_LOG_INFO("Render pass created");
+    CGE_LOG_INFO("Render pass created (color + depth)");
 }
 
 void Renderer::createGraphicsPipeline()
@@ -720,6 +816,14 @@ void Renderer::createGraphicsPipeline()
     rasterizer.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.lineWidth   = 1.0f;
 
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable   = VK_TRUE;
+    depthStencil.depthWriteEnable  = VK_TRUE;
+    depthStencil.depthCompareOp     = VK_COMPARE_OP_LESS;
+    depthStencil.minDepthBounds     = 0.0f;
+    depthStencil.maxDepthBounds     = 1.0f;
+
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType   = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -760,6 +864,7 @@ void Renderer::createGraphicsPipeline()
     info.pViewportState       = &viewportState;
     info.pRasterizationState  = &rasterizer;
     info.pMultisampleState    = &multisampling;
+    info.pDepthStencilState   = &depthStencil;
     info.pColorBlendState     = &colorBlend;
     info.pDynamicState        = &dynamicState;
     info.layout               = m_pipelineLayout;
@@ -774,18 +879,20 @@ void Renderer::createGraphicsPipeline()
     vkDestroyShaderModule(m_device->device(), vertModule, nullptr);
     vkDestroyShaderModule(m_device->device(), fragModule, nullptr);
 
-    CGE_LOG_INFO("Graphics pipeline created");
+    CGE_LOG_INFO("Graphics pipeline created (with depth test)");
 }
 
 void Renderer::createFramebuffers()
 {
     m_framebuffers.resize(m_swapchain->imageCount());
     for (uint32_t i = 0; i < m_swapchain->imageCount(); ++i) {
+        VkImageView attachments[2] = { m_swapchain->views()[i], m_depthViews[i] };
+
         VkFramebufferCreateInfo info{};
         info.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         info.renderPass      = m_renderPass;
-        info.attachmentCount = 1;
-        info.pAttachments    = &m_swapchain->views()[i];
+        info.attachmentCount = 2;
+        info.pAttachments    = attachments;
         info.width           = m_swapchain->extent().width;
         info.height          = m_swapchain->extent().height;
         info.layers          = 1;
@@ -868,7 +975,12 @@ void Renderer::drawFrame()
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    VkClearValue clearColor = { {{ 0.09f, 0.11f, 0.16f, 1.0f }} };
+    VkClearValue clearValues[2]{};
+    clearValues[0].color.float32[0] = 0.09f;
+    clearValues[0].color.float32[1] = 0.11f;
+    clearValues[0].color.float32[2] = 0.16f;
+    clearValues[0].color.float32[3] = 1.0f;
+    clearValues[1].depthStencil = { 1.0f, 0 };
 
     VkRenderPassBeginInfo passInfo{};
     passInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -876,8 +988,8 @@ void Renderer::drawFrame()
     passInfo.framebuffer       = m_framebuffers[imageIndex];
     passInfo.renderArea.offset = { 0, 0 };
     passInfo.renderArea.extent = m_swapchain->extent();
-    passInfo.clearValueCount   = 1;
-    passInfo.pClearValues      = &clearColor;
+    passInfo.clearValueCount   = 2;
+    passInfo.pClearValues      = clearValues;
 
     vkCmdBeginRenderPass(cmd, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -972,6 +1084,11 @@ Renderer::~Renderer()
 
     for (VkFramebuffer fb : m_framebuffers) {
         vkDestroyFramebuffer(dev, fb, nullptr);
+    }
+    for (size_t i = 0; i < m_depthImages.size(); ++i) {
+        vkDestroyImageView(dev, m_depthViews[i], nullptr);
+        vkDestroyImage(dev, m_depthImages[i], nullptr);
+        vkFreeMemory(dev, m_depthMemories[i], nullptr);
     }
     if (m_pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(dev, m_pipeline, nullptr);

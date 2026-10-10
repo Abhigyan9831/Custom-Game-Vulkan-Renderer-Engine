@@ -73,13 +73,15 @@ private:
     void allocateTextureSets(const ModelData& model, int fallbackIndex);
     void createTexture(const TextureData& data, GpuTexture& out);
     void transitionImageLayout(VkImage image, VkImageLayout oldLayout,
-                              VkImageLayout newLayout);
+                               VkImageLayout newLayout);
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     void updateUniformBuffer(uint32_t currentFrame);
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                       VkMemoryPropertyFlags properties,
                       VkBuffer& buffer, VkDeviceMemory& bufferMemory);
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
+    void createDepthResources();
+    [[nodiscard]] VkFormat findDepthFormat() const;
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     static std::vector<char> readFile(const std::string& path);
 
@@ -111,6 +113,10 @@ private:
     std::vector<VkSemaphore> m_imageAvailable;
     std::vector<VkSemaphore> m_renderFinished;
     std::vector<VkFence> m_inFlight;
+
+    std::vector<VkImage> m_depthImages;
+    std::vector<VkDeviceMemory> m_depthMemories;
+    std::vector<VkImageView> m_depthViews;
 
     uint32_t m_currentFrame = 0;
     std::chrono::steady_clock::time_point m_startTime;
