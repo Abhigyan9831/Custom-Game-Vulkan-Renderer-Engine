@@ -175,7 +175,13 @@ VulkanDevice::VulkanDevice(VkInstance instance, VkSurfaceKHR surface,
     queueInfo.pQueuePriorities = &queuePriority;
 
     std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    
+    VkPhysicalDeviceFeatures supported{};
+    vkGetPhysicalDeviceFeatures(m_physical, &supported);
+
     VkPhysicalDeviceFeatures features{};
+    features.samplerAnisotropy = supported.samplerAnisotropy;
+    if(!supported.samplerAnisotropy){ CGE_LOG_WARN("samplerAnisotropy not supported");}
 
     VkDeviceCreateInfo deviceInfo{};
     deviceInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

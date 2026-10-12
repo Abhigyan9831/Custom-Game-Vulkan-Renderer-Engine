@@ -14,6 +14,18 @@ namespace cge {
 
 namespace {
 
+int imageIndexOf(const tinygltf::Model& model, int textureIndex)
+{
+    if (textureIndex < 0 || textureIndex >= static_cast<int>(model.textures.size())) {
+        return -1;
+    }
+    const int img = model.textures[textureIndex].source;
+    if (img < 0 || img >= static_cast<int>(model.images.size())) {
+        return -1;
+    }
+    return img;
+}
+
 glm::mat4 nodeMatrix(const tinygltf::Node& node)
 {
     glm::mat4 m(1.0f);
@@ -40,15 +52,11 @@ void walkNodes(const tinygltf::Model& model, const tinygltf::Node& node,
     const glm::mat4 world = parentMatrix * nodeMatrix(node);
 
     if (node.mesh >= 0) {
-        // Skinned meshes in glTF 2.0 are positioned by their skeleton/joints.
-        // Applying the parent armature node's transform (which contains a 90-degree X-rotation)
-        // causes the character to be tilted horizontally instead of standing upright.
         const glm::mat4 meshWorld = (node.skin >= 0) ? glm::mat4(1.0f) : world;
         const tinygltf::Mesh& mesh = model.meshes[node.mesh];
         for (const tinygltf::Primitive& prim : mesh.primitives) {
             MeshData data;
 
-            // ---- positions ----
             const auto& posAcc = model.accessors[prim.attributes.at("POSITION")];
             const auto& posView = model.bufferViews[posAcc.bufferView];
             const float* posData = reinterpret_cast<const float*>(
@@ -60,7 +68,6 @@ void walkNodes(const tinygltf::Model& model, const tinygltf::Node& node,
                 data.positions[i] = glm::vec3(meshWorld * glm::vec4(local, 1.0f));
             }
 
-            // ---- normals ----
             if (prim.attributes.count("NORMAL")) {
                 const auto& nAcc = model.accessors[prim.attributes.at("NORMAL")];
                 const auto& nView = model.bufferViews[nAcc.bufferView];
@@ -77,7 +84,25 @@ void walkNodes(const tinygltf::Model& model, const tinygltf::Node& node,
                 data.normals.resize(posAcc.count, glm::vec3(0.0f, 1.0f, 0.0f));
             }
 
-            // ---- UVs ----
+            glm::vec2 uvScale(1.0f);
+            glm::vec2 uvOffset(0.0f);
+            if (prim.material >= 0) {
+                const auto& mat = model.materials[prim.material];
+                const auto& baseTex = mat.pbrMetallicRoughness.baseColorTexture;
+                auto it = baseTex.extensions.find("KHR_texture_transform");
+                if (it != baseTex.extensions.end() && it->second.IsObject()) {
+                    const auto& ext = it->second;
+                    if (ext.Has("scale") && ext.Get("scale").ArrayLen() == 2) {
+                        uvScale.x = static_cast<float>(ext.Get("scale").Get(0).GetNumberAsDouble());
+                        uvScale.y = static_cast<float>(ext.Get("scale").Get(1).GetNumberAsDouble());
+                    }
+                    if (ext.Has("offset") && ext.Get("offset").ArrayLen() == 2) {
+                        uvOffset.x = static_cast<float>(ext.Get("offset").Get(0).GetNumberAsDouble());
+                        uvOffset.y = static_cast<float>(ext.Get("offset").Get(1).GetNumberAsDouble());
+                    }
+                }
+            }
+
             if (prim.attributes.count("TEXCOORD_0")) {
                 const auto& uvAcc = model.accessors[prim.attributes.at("TEXCOORD_0")];
                 const auto& uvView = model.bufferViews[uvAcc.bufferView];
@@ -86,13 +111,13 @@ void walkNodes(const tinygltf::Model& model, const tinygltf::Node& node,
                      .data[uvView.byteOffset + uvAcc.byteOffset]);
                 data.uvs.resize(uvAcc.count);
                 for (size_t i = 0; i < uvAcc.count; ++i) {
-                    data.uvs[i] = glm::vec2(uvData[i * 2], uvData[i * 2 + 1]);
+                    data.uvs[i] = glm::vec2(uvData[i * 2] * uvScale.x + uvOffset.x,
+                                            uvData[i * 2 + 1] * uvScale.y + uvOffset.y);
                 }
             } else {
                 data.uvs.resize(posAcc.count, glm::vec2(0.0f));
             }
 
-            // ---- colors ----
             if (prim.attributes.count("COLOR_0")) {
                 const auto& cAcc = model.accessors[prim.attributes.at("COLOR_0")];
                 const auto& cView = model.bufferViews[cAcc.bufferView];
@@ -104,23 +129,33 @@ void walkNodes(const tinygltf::Model& model, const tinygltf::Node& node,
                     data.colors[i] = glm::vec3(cData[i * 3], cData[i * 3 + 1], cData[i * 3 + 2]);
                 }
             } else {
-                data.colors.resize(posAcc.count, glm::vec3(0.8f));
+                data.colors.resize(posAcc.count, glm::vec3(1.0f));
             }
 
-            
-            data.textureIndex = -1;
+            // Material-specific adjustments
             if (prim.material >= 0) {
                 const auto& mat = model.materials[prim.material];
-                const int texIdx = mat.pbrMetallicRoughness.baseColorTexture.index;
-                if (texIdx >= 0) {
-                    const int imageIdx = model.textures[texIdx].source;
-                    if (imageIdx >= 0) {
-                        data.textureIndex = imageIdx;   
+                // Sakura Petals (Material 6 Sakura_Petal.001): tint with rosy-red cherry blossom tone
+                if (mat.name == "Sakura_Petal.001" || prim.material == 6) {
+                    for (auto& col : data.colors) {
+                        col *= glm::vec3(1.18f, 0.72f, 0.82f);
                     }
                 }
             }
 
-            // ---- indices ----
+            data.baseColorIndex = -1;
+            data.metallicRoughnessIndex = -1;
+            data.normalIndex = -1;
+            if (prim.material >= 0) {
+                const auto& mat = model.materials[prim.material];
+                const auto& pbr = mat.pbrMetallicRoughness;
+                data.baseColorIndex = imageIndexOf(model, pbr.baseColorTexture.index);
+                data.metallicRoughnessIndex = imageIndexOf(model, pbr.metallicRoughnessTexture.index);
+                if (mat.normalTexture.index >= 0) {
+                    data.normalIndex = imageIndexOf(model, mat.normalTexture.index);
+                }
+            }
+
             const auto& idxAcc = model.accessors[prim.indices];
             const auto& idxView = model.bufferViews[idxAcc.bufferView];
             const auto& buffer  = model.buffers[idxView.buffer];
@@ -141,7 +176,7 @@ void walkNodes(const tinygltf::Model& model, const tinygltf::Node& node,
 
             CGE_LOG_INFO("Loaded mesh primitive: " + std::to_string(data.positions.size()) +
                          " verts, " + std::to_string(data.indices.size()) + " indices" +
-                         (data.textureIndex >= 0 ? " (textured)" : " (no texture)"));
+                         (data.baseColorIndex >= 0 ? " (textured)" : " (no texture)"));
             out.push_back(std::move(data));
         }
     }
@@ -172,7 +207,6 @@ ModelData AssetManager::loadGlb(const std::string& path) const
 
     ModelData result;
 
-    
     for (const auto& image : model.images) {
         TextureData tex;
         tex.width  = image.width;
@@ -180,6 +214,30 @@ ModelData AssetManager::loadGlb(const std::string& path) const
         tex.pixels = image.image;
         result.textures.push_back(std::move(tex));
     }
+
+    int barkIdx = -1, seamIdx = -1;
+    for (size_t i = 0; i < model.images.size(); ++i) {
+        if (model.images[i].name == "Bark_01_4K_Base_Color") barkIdx = static_cast<int>(i);
+        if (model.images[i].name == "sakuratree_trunk_seamremove") seamIdx = static_cast<int>(i);
+    }
+    if (barkIdx >= 0 && seamIdx >= 0 && barkIdx < static_cast<int>(result.textures.size()) &&
+        seamIdx < static_cast<int>(result.textures.size())) {
+        auto& seam = result.textures[seamIdx];
+        const auto& bark = result.textures[barkIdx];
+        if (seam.width == bark.width && seam.height == bark.height &&
+            seam.pixels.size() == bark.pixels.size() &&
+            seam.pixels.size() >= static_cast<size_t>(seam.width * seam.height * 4)) {
+            for (size_t p = 0; p < seam.pixels.size(); p += 4) {
+                const float a = static_cast<float>(seam.pixels[p + 3]) / 255.0f;
+                seam.pixels[p + 0] = static_cast<unsigned char>(seam.pixels[p + 0] * a + bark.pixels[p + 0] * (1.0f - a));
+                seam.pixels[p + 1] = static_cast<unsigned char>(seam.pixels[p + 1] * a + bark.pixels[p + 1] * (1.0f - a));
+                seam.pixels[p + 2] = static_cast<unsigned char>(seam.pixels[p + 2] * a + bark.pixels[p + 2] * (1.0f - a));
+                seam.pixels[p + 3] = 255;
+            }
+            CGE_LOG_INFO("Composited trunk seam overlay over base bark texture");
+        }
+    }
+
     if (!result.textures.empty()) {
         CGE_LOG_INFO("Loaded " + std::to_string(result.textures.size()) + " textures");
     } else {

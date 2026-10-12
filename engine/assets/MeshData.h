@@ -1,25 +1,25 @@
-
-
 #pragma once
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstdint>
 
-namespace cge{
+namespace cge {
 
-struct TextureData{
+struct TextureData {
     std::vector<unsigned char> pixels;
     int width = 0;
     int height = 0;
-
 };
+
 struct MeshData {
     std::vector<glm::vec3> positions;
     std::vector<glm::vec3> normals;
     std::vector<glm::vec2> uvs;
     std::vector<glm::vec3> colors;
     std::vector<uint32_t>  indices;
-    int textureIndex = -1;    
+    int baseColorIndex = -1;
+    int metallicRoughnessIndex = -1;
+    int normalIndex = -1;
 };
 
 struct ModelData {
@@ -27,5 +27,4 @@ struct ModelData {
     std::vector<TextureData> textures;
 };
 
-
-}
+} // namespace cge

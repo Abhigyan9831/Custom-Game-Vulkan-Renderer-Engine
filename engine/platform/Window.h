@@ -2,10 +2,12 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <functional>
 
 #include <vulkan/vulkan.h>
 
 struct SDL_Window;
+union SDL_Event;
 
 namespace cge {
 
@@ -18,6 +20,7 @@ public:
     Window& operator=(const Window&) = delete;
 
     void pollEvents();
+    void setEventCallback(std::function<void(const SDL_Event&)> callback) { m_eventCallback = std::move(callback); }
     [[nodiscard]] bool isOpen() const { return m_open; }
 
     [[nodiscard]] int width()  const { return m_width;  }
@@ -34,6 +37,7 @@ private:
     bool m_open = false;
     int m_width = 0;
     int m_height = 0;
+    std::function<void(const SDL_Event&)> m_eventCallback;
 };
 
 } // namespace cge

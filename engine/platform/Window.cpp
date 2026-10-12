@@ -40,6 +40,9 @@ void Window::pollEvents()
 {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (m_eventCallback) {
+            m_eventCallback(event);
+        }
         switch (event.type) {
             case SDL_EVENT_QUIT:
                 m_open = false;

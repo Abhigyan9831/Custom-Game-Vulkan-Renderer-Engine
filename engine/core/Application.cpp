@@ -3,6 +3,7 @@
 #include "engine/core/Logger.h"
 #include "engine/renderer/Renderer.h"
 
+#include <SDL3/SDL.h>
 #include <chrono>
 
 namespace cge {
@@ -11,6 +12,21 @@ Application::Application()
 {
     m_window = std::make_unique<Window>("CustomGameEngine", 800, 600);
     m_renderer = std::make_unique<Renderer>(m_window.get());
+
+    m_window->setEventCallback([this](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            // RMB drag pan (DOTA 2 camera drag)
+            if (event.motion.state & SDL_BUTTON_RMASK) {
+                m_renderer->panCamera(event.motion.xrel, event.motion.yrel);
+            }
+            // MMB / Alt-drag rotate
+            if (event.motion.state & SDL_BUTTON_MMASK) {
+                m_renderer->rotateCamera(event.motion.xrel, event.motion.yrel);
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            m_renderer->zoomCamera(event.wheel.y);
+        }
+    });
 }
 
 Application::~Application()

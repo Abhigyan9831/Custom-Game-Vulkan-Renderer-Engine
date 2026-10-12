@@ -31,6 +31,8 @@ struct Ubo {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
+    glm::vec4 lightDir;
+    glm::vec4 cameraPos;
 };
 
 struct GpuMesh {
@@ -57,6 +59,9 @@ public:
     Renderer& operator=(const Renderer&) = delete;
 
     void drawFrame();
+    void panCamera(float dx, float dy);
+    void rotateCamera(float dYaw, float dPitch);
+    void zoomCamera(float dDist);
 
 private:
     void createRenderPass();
@@ -70,7 +75,7 @@ private:
     void createUniformBuffers();
     void createDescriptorPoolAndSets();
     void loadTextures(const ModelData& model);
-    void allocateTextureSets(const ModelData& model, int fallbackIndex);
+    void allocateTextureSets(const ModelData& model, int whiteIdx, int mrIdx, int normalIdx);
     void createTexture(const TextureData& data, GpuTexture& out);
     void transitionImageLayout(VkImage image, VkImageLayout oldLayout,
                                VkImageLayout newLayout);
@@ -120,6 +125,26 @@ private:
 
     uint32_t m_currentFrame = 0;
     std::chrono::steady_clock::time_point m_startTime;
+
+    // Continuous Skeletal Animation Cycle (Idle -> Breathing -> Skill_Roar)
+    int m_mutantMeshIdx = -1;
+    VkBuffer m_mutantDynVb[MAX_FRAMES_IN_FLIGHT]{};
+    VkDeviceMemory m_mutantDynMem[MAX_FRAMES_IN_FLIGHT]{};
+    void* m_mutantMapped[MAX_FRAMES_IN_FLIGHT]{};
+    std::vector<std::vector<glm::vec3>> m_bakedPositions;
+    std::vector<std::vector<glm::vec3>> m_bakedNormals;
+    std::vector<Vertex> m_mutantBaseVertices;
+    float m_animTime = 0.0f;
+    float m_animDuration = 14.10f;
+    float m_animFps = 10.0f;
+    int m_animTotalFrames = 0;
+    float m_lastTime = 0.0f;
+
+    // Camera control (DOTA 2 style RMB drag & zoom)
+    glm::vec3 m_camTarget{0.0f, 0.8f, -1.3f};
+    float m_camDistance = 6.0f;
+    float m_camPitch = 40.0f; // degrees down
+    float m_camYaw = 0.0f;    // degrees
 };
 
 } // namespace cge
