@@ -33,6 +33,8 @@ The engine currently loads and renders a full GLB scene — environment, charact
 <p align="center">
   <img src="demo3.gif" alt="Demo" width="800" height="600"> 
 </p>
+
+
 ## Build
 
 Tested on Ubuntu 22.04, NVIDIA proprietary driver.
