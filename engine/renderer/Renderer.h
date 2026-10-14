@@ -33,6 +33,10 @@ struct Ubo {
     glm::mat4 proj;
     glm::vec4 lightDir;
     glm::vec4 cameraPos;
+    glm::vec4 sunColor;             
+    glm::vec4 pointLights[8];       
+    glm::vec4 pointLightCount;
+    glm::mat4 lightSpaceMatrix;
 };
 
 struct GpuMesh {
@@ -86,9 +90,15 @@ private:
                       VkBuffer& buffer, VkDeviceMemory& bufferMemory);
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
     void createDepthResources();
+    void createShadowResources();
+    void recordShadowPass(VkCommandBuffer cmd);
     [[nodiscard]] VkFormat findDepthFormat() const;
+    [[nodiscard]] glm::mat4 computeLightSpaceMatrix() const;
+
+    
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     static std::vector<char> readFile(const std::string& path);
+
 
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -101,6 +111,19 @@ private:
     VkDescriptorSetLayout m_textureSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_pipeline = VK_NULL_HANDLE;
+    VkRenderPass m_shadowRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer m_shadowFramebuffer = VK_NULL_HANDLE;
+    VkPipeline m_shadowPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_shadowPipelineLayout = VK_NULL_HANDLE;
+    VkImage m_shadowImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_shadowMemory = VK_NULL_HANDLE;
+    VkImageView m_shadowView = VK_NULL_HANDLE;
+    VkSampler m_shadowSampler = VK_NULL_HANDLE;
+    glm::mat4 m_lightSpaceMatrix = glm::mat4(1.0f);
+    VkBuffer m_shadowUboBuffer[MAX_FRAMES_IN_FLIGHT]{};
+    VkDeviceMemory m_shadowUboMemory[MAX_FRAMES_IN_FLIGHT]{};
+    void* m_shadowUboMapped[MAX_FRAMES_IN_FLIGHT]{};
+    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> m_shadowDescSets{};
     std::vector<VkFramebuffer> m_framebuffers;
     std::vector<VkCommandBuffer> m_commandBuffers;
 

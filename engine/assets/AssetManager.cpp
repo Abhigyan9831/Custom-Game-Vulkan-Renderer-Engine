@@ -132,13 +132,20 @@ void walkNodes(const tinygltf::Model& model, const tinygltf::Node& node,
                 data.colors.resize(posAcc.count, glm::vec3(1.0f));
             }
 
-            // Material-specific adjustments
+            // Apply glTF material baseColorFactor (spec-correct tint, replaces hardcoded guesses)
             if (prim.material >= 0) {
                 const auto& mat = model.materials[prim.material];
-                // Sakura Petals (Material 6 Sakura_Petal.001): tint with rosy-red cherry blossom tone
-                if (mat.name == "Sakura_Petal.001" || prim.material == 6) {
-                    for (auto& col : data.colors) {
-                        col *= glm::vec3(1.18f, 0.72f, 0.82f);
+                const auto& bcf = mat.pbrMetallicRoughness.baseColorFactor; // [R,G,B,A]
+                if (bcf.size() == 4) {
+                    const glm::vec3 factor(
+                        static_cast<float>(bcf[0]),
+                        static_cast<float>(bcf[1]),
+                        static_cast<float>(bcf[2]));
+                    // Only apply if not pure white (optimization: skip no-op)
+                    if (glm::length(factor - glm::vec3(1.0f)) > 0.001f) {
+                        for (auto& col : data.colors) {
+                            col *= factor;
+                        }
                     }
                 }
             }
